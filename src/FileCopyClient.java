@@ -173,9 +173,9 @@ public class FileCopyClient extends Thread {
         if(packet != null){
             send(packet);
             //System.out.println("Packet ist nicht null");
+            packet.setTimestamp(System.nanoTime());
+            startTimer(packet);
         }
-        packet.setTimestamp(System.nanoTime());
-        startTimer(packet);
     }
 
 
