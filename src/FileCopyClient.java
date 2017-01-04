@@ -6,7 +6,7 @@
 
 import java.io.*;
 import java.net.*;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -44,7 +44,7 @@ public class FileCopyClient extends Thread {
 
     private DatagramSocket clientSocket;
 
-    private ArrayList<FCpacket> puffer;
+    private LinkedList<FCpacket> puffer = new LinkedList<>();
 
     private final ReentrantLock lock = new ReentrantLock();
 
@@ -85,13 +85,14 @@ public class FileCopyClient extends Thread {
         setUpCon();
         FCpacket firstPacket = makeControlPacket();
         fillPuffer(firstPacket);
-        //new ClientHelper().start();
+        new ClientHelper().start();
         send(firstPacket);
         startTimer(firstPacket);
         new ClientHelper().start();
         nextSeq++;
         FCpacket packet = makePacket(nextSeq);
         while (packet != null){
+            System.out.println("Nächstes Pak kommt");
             fillPuffer(packet);
             send(packet);
             startTimer(packet);
@@ -115,7 +116,7 @@ public class FileCopyClient extends Thread {
 
     public void fillPuffer(FCpacket packet) {
         lock.lock();
-        while (puffer.size() == windowSize) {
+        while (puffer.size() >= windowSize) {
             try {
                 freeSpace.await();
             } catch (InterruptedException e) {
@@ -124,24 +125,39 @@ public class FileCopyClient extends Thread {
         }
         if (!puffer.contains(packet)) {
             puffer.add(packet);
+            Collections.sort(puffer);
         }
         lock.unlock();
     }
 
     public void removePackets() {
         lock.lock();
-        while (!puffer.isEmpty() && puffer.get(0).isValidACK()) {
+        while (!puffer.isEmpty() && puffer.getFirst().isValidACK()) {
+            //System.out.println("remove pack nr " + puffer.get(0).getSeqNum());
             puffer.remove(0);
+
             freeSpace.signal();
         }
         lock.unlock();
     }
 
     public FCpacket getPacket(long seqNr) {
+        FCpacket retval = null;
         lock.lock();
-        FCpacket result = puffer.stream().filter(s -> s.getSeqNum() == seqNr).findAny().orElse(null);
+        //FCpacket result = puffer.stream().filter(s -> s.getSeqNum() == seqNr).findAny().orElse(null);
+        int i = 0;
+        for (i = 0; i < puffer.size(); i++) {
+            if (puffer.get(i).getSeqNum() == seqNr) {
+                break;
+            }
+        }
+        try {
+            testOut("Get: " + i);
+            retval = puffer.get(i);
+        } catch (IndexOutOfBoundsException e) {
+        }
         lock.unlock();
-        return result;
+        return retval;
     }
 
     /**
@@ -170,6 +186,7 @@ public class FileCopyClient extends Thread {
         FCpacket packet = getPacket(seqNum);
         if(packet != null){
             send(packet);
+            //System.out.println("Packet ist nicht null");
         }
         packet.setTimestamp(System.nanoTime());
         startTimer(packet);
@@ -213,7 +230,8 @@ public class FileCopyClient extends Thread {
             System.err.println("Could not read Datalength");
         }
         FCpacket packet = null;
-        if(packLen < 0){
+        if(packLen != -1){
+            System.out.println("erstelle nächses paket");
             packet = new FCpacket(seqNr, sendData, packLen);
         }
         return packet;
@@ -243,7 +261,7 @@ public class FileCopyClient extends Thread {
                     System.err.println("Could not receive Packet");
                 }
                 FCpacket ackPack = null;
-                long seqNr = ackPack.makeLong(packet.getData(), 0, data.length);
+                long seqNr = makeLong(packet.getData(), 0, data.length);
                 ackPack = getPacket(seqNr);
                 if (ackPack != null) {
                     cancelTimer(ackPack);
@@ -254,6 +272,16 @@ public class FileCopyClient extends Thread {
                 }
                 removePackets();
             }
+        }
+
+        private long makeLong(byte[] buf, int i, int length) {
+            long r = 0;
+            length += i;
+
+            for (int j = i; j < length; j++)
+                r = (r << 8) | (buf[j] & 0xffL);
+
+            return r;
         }
     }
 
