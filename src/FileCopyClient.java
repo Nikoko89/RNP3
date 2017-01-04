@@ -44,7 +44,7 @@ public class FileCopyClient extends Thread {
 
     private DatagramSocket clientSocket;
 
-    private LinkedList<FCpacket> puffer = new LinkedList<>();
+    private LinkedList<FCpacket> sendBuf = new LinkedList<>();
 
     private final ReentrantLock lock = new ReentrantLock();
 
@@ -116,48 +116,34 @@ public class FileCopyClient extends Thread {
 
     public void fillPuffer(FCpacket packet) {
         lock.lock();
-        while (puffer.size() >= windowSize) {
+        while (sendBuf.size() == windowSize) {
             try {
                 freeSpace.await();
             } catch (InterruptedException e) {
                 System.err.println("Could not wait to get free space");
             }
         }
-        if (!puffer.contains(packet)) {
-            puffer.add(packet);
-            Collections.sort(puffer);
+        if (!sendBuf.contains(packet)) {
+            sendBuf.add(packet);
+            Collections.sort(sendBuf);
         }
         lock.unlock();
     }
 
     public void removePackets() {
         lock.lock();
-        while (!puffer.isEmpty() && puffer.getFirst().isValidACK()) {
-            //System.out.println("remove pack nr " + puffer.get(0).getSeqNum());
-            puffer.remove(0);
-
+        while (!sendBuf.isEmpty() && sendBuf.getFirst().isValidACK()) {
+            sendBuf.removeFirst();
             freeSpace.signal();
         }
         lock.unlock();
     }
 
     public FCpacket getPacket(long seqNr) {
-        FCpacket retval = null;
         lock.lock();
-        //FCpacket result = puffer.stream().filter(s -> s.getSeqNum() == seqNr).findAny().orElse(null);
-        int i = 0;
-        for (i = 0; i < puffer.size(); i++) {
-            if (puffer.get(i).getSeqNum() == seqNr) {
-                break;
-            }
-        }
-        try {
-            testOut("Get: " + i);
-            retval = puffer.get(i);
-        } catch (IndexOutOfBoundsException e) {
-        }
+        FCpacket result = sendBuf.stream().filter(s -> s.getSeqNum() == seqNr).findAny().orElse(null);
         lock.unlock();
-        return retval;
+        return result;
     }
 
     /**
@@ -252,7 +238,7 @@ public class FileCopyClient extends Thread {
 
     private class ClientHelper extends Thread {
         public void run() {
-            while (!puffer.isEmpty()) {
+            while (!sendBuf.isEmpty()) {
                 byte[] data = new byte[8];
                 DatagramPacket packet = new DatagramPacket(data, data.length);
                 try {
