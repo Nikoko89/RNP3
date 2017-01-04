@@ -192,7 +192,7 @@ public class FCpacket implements Comparable<FCpacket> {
    * Convert a byte array to a long. Bits are collected from
    * <code>buf[i..i+length-1]</code>.
    */
-  private long makeLong(byte[] buf, int i, int length) {
+  public long makeLong(byte[] buf, int i, int length) {
     long r = 0;
     length += i;
 
